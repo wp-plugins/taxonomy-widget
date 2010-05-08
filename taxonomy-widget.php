@@ -5,7 +5,7 @@ Plugin URI: http://wordpress.mfields.org/plugins/taxonomy-widget/
 Description: Display taxonomies in your sidebar.
 Version: 0.1
 Author: Michael Fields
-Author URI: http://mfields.org/
+Author URI: http://wordpress.mfields.org/
 Copyright 2009-2010  Michael Fields  michael@mfields.org
 
 This program is free software; you can redistribute it and/or modify
@@ -84,7 +84,7 @@ if( !function_exists( 'mfields_taxonomy_widget_script_loader' ) ) {
 		$listeners = '';
 		if( !empty( $mfields_taxonomy_widget_js ) ) {
 			foreach( $mfields_taxonomy_widget_js as $id )
-				$listeners.= "\n\t" . 'document.getElementById( "' . $id . '" ).addEventListener( "change", changeTaxonomy, false );';
+				$listeners.= "\n\t" . 'document.getElementById( "' . $id . '" ).onchange = changeTaxonomy;';
 		}
 		print "\n\t\t" . MFIELDS_TAXONOMY_WIDGET_COMMENT_START . "\n";
 		print <<<EOF
