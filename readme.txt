@@ -4,7 +4,7 @@ Taxonomy Widget
 Contributors: mfields
 Donate link: http://mfields.org/donate/
 Tags: taxonomy, tag, category, widget, cloud, dropdown
-Requires at least: 3.0
+Requires at least: 2.9.2
 Tested up to: 3.0
 Stable tag: trunk
 
@@ -45,6 +45,9 @@ If you find that this plugin is has a bug, does not play nicely with other plugi
 
 
 ==Changelog==
+
+= 0.2 =
+* Now compatible with WordPress Version 2.9.2.
 
 = 0.1 =
 * Original Release - Works With: wp 3.0 Beta 2.

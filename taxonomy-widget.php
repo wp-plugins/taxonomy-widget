@@ -1,9 +1,9 @@
 <?php
 /*
 Plugin Name: Taxonomy Widget
-Plugin URI: http://wordpress.mfields.org/plugins/taxonomy-widget/
-Description: Display taxonomies in your sidebar.
-Version: 0.1
+Plugin URI: http://wordpress.org/extend/plugins/taxonomy-widget/
+Description: Display post taxonomies in your sidebar.
+Version: 0.2
 Author: Michael Fields
 Author URI: http://wordpress.mfields.org/
 Copyright 2009-2010  Michael Fields  michael@mfields.org
@@ -103,6 +103,15 @@ EOF;
 		print "\n\t\t" . MFIELDS_TAXONOMY_WIDGET_COMMENT_END . "\n";
 	}
 }
+
+/* Support for 2.9.2 */
+if( !function_exists( 'get_taxonomies' ) ) {
+	function get_taxonomies() {
+		global $wp_taxonomies;
+		return $wp_taxonomies;
+	}
+}
+
 
 if( !class_exists( 'mfields_taxonomy_widget' ) ) {
 	add_action( 'widgets_init', create_function( '', 'return register_widget( "mfields_taxonomy_widget" );' ) );
