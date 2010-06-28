@@ -3,7 +3,7 @@
 Plugin Name: Taxonomy Widget
 Plugin URI: http://wordpress.org/extend/plugins/taxonomy-widget/
 Description: Display post taxonomies in your sidebar.
-Version: 0.2
+Version: 0.2.1
 Author: Michael Fields
 Author URI: http://wordpress.mfields.org/
 Copyright 2009-2010  Michael Fields  michael@mfields.org
@@ -43,9 +43,8 @@ define( 'MFIELDS_TAXONOMY_WIDGET_COMMENT_END', '<!-- End Output from Taxonomy Wi
 */
 $mfields_taxonomy_widget_js = array();
 
-
+add_action( 'admin_head-widgets.php', 'mfields_taxonomy_widget_admin_styles' );
 if( !function_exists( 'mfields_taxonomy_widget_admin_styles' ) ) {
-	add_action( 'admin_head-widgets.php', 'mfields_taxonomy_widget_admin_styles' );
 	/**
 	* Admin Style Action Handler
 	* @uses MFIELDS_TAXONOMY_WIDGET_COMMENT_START
@@ -69,8 +68,9 @@ EOF;
 	}
 }
 
+add_action( 'wp_footer', 'mfields_taxonomy_widget_script_loader' );
 if( !function_exists( 'mfields_taxonomy_widget_script_loader' ) ) {
-	add_action( 'wp_footer', 'mfields_taxonomy_widget_script_loader' );
+	
 	/**
 	* Print Javascript to the live site's footer.
 	* @uses $mfields_taxonomy_widget_js
@@ -112,9 +112,8 @@ if( !function_exists( 'get_taxonomies' ) ) {
 	}
 }
 
-
+add_action( 'widgets_init', create_function( '', 'return register_widget( "mfields_taxonomy_widget" );' ) );
 if( !class_exists( 'mfields_taxonomy_widget' ) ) {
-	add_action( 'widgets_init', create_function( '', 'return register_widget( "mfields_taxonomy_widget" );' ) );
 	class mfields_taxonomy_widget extends WP_Widget {
 		var $templates = array ( 
 			'ul' => 'Unordered List',
@@ -389,15 +388,18 @@ class mfields_walker_taxonomy_dropdown extends Walker {
 			
 		$output .= "\t<option class=\"level-$depth\" value=\"" . $value . "\"";
 		
-		if ( $category->taxonomy === 'category' ) {
-			if ( $category->term_id == $args['selected'] )
-				$output .= ' selected="selected"';
+		pr( $category->taxonomy );
+		
+		if( is_category() || is_tax() ) {
+			if ( $category->taxonomy === 'category' ) {
+				if ( $category->term_id == $args['selected'] )
+					$output .= ' selected="selected"';
+			}
+			else {
+				if ( $category->slug == $args['selected'] )
+					$output .= ' selected="selected"';
+			}
 		}
-		else {
-			if ( $category->slug == $args['selected'] )
-				$output .= ' selected="selected"';
-		}
-			
 		$output .= '>';
 		$output .= $pad . $cat_name;
 		if ( $args['show_count'] )

@@ -46,6 +46,9 @@ If you find that this plugin is has a bug, does not play nicely with other plugi
 
 ==Changelog==
 
+= 0.2.1 =
+* __BUGFIX:__ Dropdown now displays 'Please Choose' on non-taxonomy views.
+
 = 0.2 =
 * Now compatible with WordPress Version 2.9.2.
 
