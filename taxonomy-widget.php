@@ -3,7 +3,7 @@
 Plugin Name: Taxonomy Widget
 Plugin URI: http://wordpress.org/extend/plugins/taxonomy-widget/
 Description: Display post taxonomies in your sidebar.
-Version: 0.2.1
+Version: 0.2.2
 Author: Michael Fields
 Author URI: http://wordpress.mfields.org/
 Copyright 2009-2010  Michael Fields  michael@mfields.org
@@ -387,8 +387,6 @@ class mfields_walker_taxonomy_dropdown extends Walker {
 			$value = esc_attr( $category->slug );
 			
 		$output .= "\t<option class=\"level-$depth\" value=\"" . $value . "\"";
-		
-		pr( $category->taxonomy );
 		
 		if( is_category() || is_tax() ) {
 			if ( $category->taxonomy === 'category' ) {
