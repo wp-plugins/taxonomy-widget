@@ -3,7 +3,7 @@
 Plugin Name: Taxonomy Widget
 Plugin URI: http://wordpress.org/extend/plugins/taxonomy-widget/
 Description: Display post taxonomies in your sidebar.
-Version: 0.2.2
+Version: 0.3
 Author: Michael Fields
 Author URI: http://wordpress.mfields.org/
 Copyright 2009-2010  Michael Fields  michael@mfields.org
@@ -221,9 +221,13 @@ if( !class_exists( 'mfields_taxonomy_widget' ) ) {
 			
 			switch( $template ) {
 				case 'dropdown' :
+					$text = __( 'Please Choose', 'mfields-taxonomy-widget' );
+					$text = apply_filters( 'taxonomy-widget-show-option-none', $text );
+					$text = apply_filters( 'taxonomy-widget-show-option-none-' . $taxonomy, $text );
+					$text = esc_attr( $text );
 					$taxonomy_args['id'] = $this->get_field_id( 'mfields_taxonomy_widget_dropdown_wrapper' );
 					$taxonomy_args['name'] = $this->get_query_var_name( $taxonomy );
-					$taxonomy_args['show_option_none'] = __('Please Choose');
+					$taxonomy_args['show_option_none'] = $text;
 					$taxonomy_args['selected'] = $selected;
 					mfields_dropdown_taxonomy_terms( apply_filters( 'mfields_taxonomy_widget_args_dropdown', $taxonomy_args ) );
 					global $mfields_taxonomy_widget_js;
@@ -261,9 +265,14 @@ if( !class_exists( 'mfields_taxonomy_widget' ) ) {
 			$display_title = isset( $instance['display_title'] ) ? (bool) $instance['display_title'] : true;
 			$count = isset( $instance['count'] ) ? (bool) $instance['count'] : false;
 			$hierarchical = isset( $instance['hierarchical'] ) ? (bool) $instance['hierarchical'] : false;
-			$template = $this->sanitize_template( $instance['template'] );
-			$taxonomy = $this->sanitize_taxonomy( $instance['taxonomy'] );
-			
+			$template = 'ul';
+			if( isset( $instance['template'] ) ) {
+				$template = $this->sanitize_template( $instance['template'] );
+			}
+			$taxonomy = 'category';
+			if( isset( $instance['taxonomy'] ) ) {
+				$taxonomy = $this->sanitize_taxonomy( $instance['taxonomy'] );
+			}
 			print "\n\t" . '<div class="mfields-taxonomy-widget-admin">';
 			
 			/* TITLE */
