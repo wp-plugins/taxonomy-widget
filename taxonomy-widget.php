@@ -1,12 +1,13 @@
 <?php
 /*
-Plugin Name: Taxonomy Widget
-Plugin URI: http://wordpress.org/extend/plugins/taxonomy-widget/
-Description: Display post taxonomies in your sidebar.
-Version: 0.3
-Author: Michael Fields
-Author URI: http://wordpress.mfields.org/
-Copyright 2009-2010  Michael Fields  michael@mfields.org
+Plugin Name:    Taxonomy Widget
+Plugin URI:     http://wordpress.org/extend/plugins/taxonomy-widget/
+Description:    Display taxonomy terms in your sidebar.
+Version:        0.6
+Author:         Michael Fields
+Author URI:     http://wordpress.mfields.org/
+
+Copyright 2009-2011  Michael Fields  michael@mfields.org
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License version 2 as published by
@@ -20,404 +21,358 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
-/**
-* Wrapper function for print_r()
-*/
-if( !function_exists( 'pr' ) ) {
-	function pr( $var ) {
-		print '<pre>' . print_r( $var, true ) . '</pre>';
+
+function mfields_taxonomy_widget_register() {
+	$taxonomies = get_taxonomies( array( 'public' => true ), 'objects' );
+	if ( empty( $taxonomies ) ) {
+		return;
 	}
+	register_widget( 'Mfields_Taxonomy_Widget' );
 }
+add_action( 'widgets_init', 'mfields_taxonomy_widget_register' );
 
 
-/**
-* HTML Comments to identify output created by this plugin.
-*/
-define( 'MFIELDS_TAXONOMY_WIDGET_COMMENT_START', '<!-- Begin Output from Taxonomy Widget Plugin -->' );
-define( 'MFIELDS_TAXONOMY_WIDGET_COMMENT_END', '<!-- End Output from Taxonomy Widget Plugin -->' );
+class Mfields_Taxonomy_Widget extends WP_Widget {
+	static $listeners = array();
+	var $templates = array();
+	var $taxonomies = array();
+	var $javascript_has_been_printed = false;
+	var $event_handlers = array();
+	var $default_args = array(
+		'count'         => 0,
+		'display_title' => 1,
+		'hierarchical'  => 0,
+		'taxonomy'      => 'category',
+		'template'      => 'ul',
+		'title'         => '',
+		);
 
+	function Mfields_Taxonomy_Widget() {
 
-/**
-* Store Event Listeners for each widget with the dropdown template
-* @global
-*/
-$mfields_taxonomy_widget_js = array();
+		/* Configuration. */
+		$this->WP_Widget( 'taxonomy', __( 'Taxonomy', 'mfields-taxonomy-widget' ), array(
+			'classname'   => 'widget_taxonomy',
+			'description' => __( 'Create a list, dropdown or term cloud of any taxonomy.', 'mfields-taxonomy-widget' )
+		) );
 
-add_action( 'admin_head-widgets.php', 'mfields_taxonomy_widget_admin_styles' );
-if( !function_exists( 'mfields_taxonomy_widget_admin_styles' ) ) {
-	/**
-	* Admin Style Action Handler
-	* @uses MFIELDS_TAXONOMY_WIDGET_COMMENT_START
-	* @uses MFIELDS_TAXONOMY_WIDGET_COMMENT_END
-	* @return void
-	*/
-	function mfields_taxonomy_widget_admin_styles() {
-		print "\n\t\t" . MFIELDS_TAXONOMY_WIDGET_COMMENT_START . "\n";
+		/* Supported templates. */
+		$this->templates = array (
+			'cloud'    => __( 'Cloud', 'mfields-taxonomy-widget' ),
+			'dropdown' => __( 'Dropdown', 'mfields-taxonomy-widget' ),
+			'ol'       => __( 'Ordered List', 'mfields-taxonomy-widget' ),
+			'ul'       => __( 'Unordered List', 'mfields-taxonomy-widget' ),
+		);
+
+		/* Get all public taxonomies. */
+		$this->taxonomies = get_taxonomies( array( 'public' => true ), 'objects' );
+		if ( empty( $this->taxonomies ) ) {
+			return;
+		}
+
+		$taxonomies = array_keys( $this->taxonomies );
+		if ( ! in_array( 'category', $taxonomies ) ) {
+			$this->default_args['taxonomy'] = $taxonomies[0];
+		}
+
+		/* Custom CSS is for logged-in users only. */
+		if ( current_user_can( 'edit_theme_options' ) ) {
+			add_action( 'admin_head-widgets.php', array( &$this, 'css_admin' ) );
+			add_action( 'admin_head-widgets.php', array( &$this, 'css_dialog' ) );
+			add_action( 'wp_head', array( &$this, 'css_dialog' ) );
+		}
+
+		/* Javascript listeners for dropdowns. */
+		add_action( 'wp_footer', array( &$this, 'listeners_print' ) );
+	}
+
+	function css_admin() {
 		print <<<EOF
-		<style type="text/css">
-		.mfields-taxonomy-widget-admin .heading,
-		.mfields-taxonomy-widget-admin legend {
-			font-weight: bold;
-			}
-		.mfields-taxonomy-widget-admin fieldset{
-			margin:1em 0;
-			}
-		</style>
+<style type="text/css">
+.mfields-taxonomy-widget-admin .heading,
+.mfields-taxonomy-widget-admin legend {
+	font-weight: bold;
+	}
+.mfields-taxonomy-widget-admin fieldset{
+	margin:1em 0;
+	}
+</style>
 EOF;
-		print "\n\t\t" . MFIELDS_TAXONOMY_WIDGET_COMMENT_END . "\n";
 	}
-}
 
-add_action( 'wp_footer', 'mfields_taxonomy_widget_script_loader' );
-if( !function_exists( 'mfields_taxonomy_widget_script_loader' ) ) {
-	
-	/**
-	* Print Javascript to the live site's footer.
-	* @uses $mfields_taxonomy_widget_js
-	* @uses MFIELDS_TAXONOMY_WIDGET_COMMENT_START
-	* @uses MFIELDS_TAXONOMY_WIDGET_COMMENT_END
-	* @return void
-	*/
-	function mfields_taxonomy_widget_script_loader() {
-		global $mfields_taxonomy_widget_js;
-		$url = get_option('home');
-		$listeners = '';
-		if( !empty( $mfields_taxonomy_widget_js ) ) {
-			foreach( $mfields_taxonomy_widget_js as $id )
-				$listeners.= "\n\t" . 'document.getElementById( "' . $id . '" ).onchange = changeTaxonomy;';
-		}
-		print "\n\t\t" . MFIELDS_TAXONOMY_WIDGET_COMMENT_START . "\n";
+	function css_dialog() {
 		print <<<EOF
-		<script type='text/javascript'>
-		/* <![CDATA[ */
-		function changeTaxonomy( e, query_var ) {
-			if ( this.options[this.selectedIndex].value != 0 && this.options[this.selectedIndex].value != -1 ) {
-				location.href = "{$url}/?" + this.name + "=" + this.options[this.selectedIndex].value;
-			}
+<style type="text/css">
+.dialog {
+	padding:.5em .75em;
+	margin:1em;
+	border:.25em dotted #acd2e5;
+	background-color:#bfeaff;
+	width:100%;
+}
+.dialog.mfields-taxonomy-widget-error    { background-color:#ffd9d9; border-color:#e5b8b8; }
+.dialog.mfields-notice   { background-color:#fffabf; border-color:#f2e76d }
+.dialog.mfields-success  { background-color:#bfffc5; border-color:#a3d9a7 }
+</style>
+EOF;
+	}
+
+	function listeners_add( $id ) {
+		if ( isset( $id ) && ! in_array( $id, self::$listeners ) ) {
+			self::$listeners[] = $id;
 		}
-		$listeners
-		/* ]]> */
-		</script>
+	}
+
+	function listeners_print() {
+		$url = get_option( 'home' );
+
+		$listeners = array();
+		foreach ( self::$listeners as $id ) {
+			$listeners[] = 'document.getElementById( "' . $id . '" ).onchange = changeTaxonomy;';
+		}
+		$listeners = join( "\n", $listeners );
 		
+print <<<EOF
+<script type='text/javascript'>
+/* <![CDATA[ */
+function changeTaxonomy() {
+	if ( 0 == this.options[this.selectedIndex].value ) {
+		return;
+	}
+	if ( 0 == this.options[this.selectedIndex].value ) {
+		return;
+	}
+	location.href = this.options[this.selectedIndex].value;
+}
+$listeners
+/* ]]> */
+</script>
 EOF;
-		print "\n\t\t" . MFIELDS_TAXONOMY_WIDGET_COMMENT_END . "\n";
 	}
-}
 
-/* Support for 2.9.2 */
-if( !function_exists( 'get_taxonomies' ) ) {
-	function get_taxonomies() {
-		global $wp_taxonomies;
-		return $wp_taxonomies;
-	}
-}
+	function clean_args( $args ) {
+		/*
+		 * Merge $args into defaults.
+		 * wp_parse_args() works much like array_merge() only the argument order is reversed.
+		 */
+		$args = wp_parse_args( $args, $this->default_args );
 
-add_action( 'widgets_init', create_function( '', 'return register_widget( "mfields_taxonomy_widget" );' ) );
-if( !class_exists( 'mfields_taxonomy_widget' ) ) {
-	class mfields_taxonomy_widget extends WP_Widget {
-		var $templates = array ( 
-			'ul' => 'Unordered List',
-			'ol' => 'Ordered List',
-			'dropdown' => 'Dropdown',
-			'cloud' => 'Cloud'
-			);
-		var $excluded_taxonomies = array(
-			'nav_menu',
-			'link_category'
-			);
-		var $taxonomies = array();
-		var $javascript_has_been_printed = false;
-		var $event_handlers = array();
-		function mfields_taxonomy_widget() {
-			$widget_ops = array( 'classname' => 'widget_taxonomy', 'description' => __( "A list or dropdown of taxonomies." ) );
-			$this->WP_Widget('taxonomy', __('Taxonomy'), $widget_ops);
-			$this->taxonomies = $this->get_taxonomies();
-			
-		}
-		function sanitize_template( $template ) {
-			return ( array_key_exists( $template, $this->templates ) ) ? $template : 'ul';
-		}
-		function sanitize_taxonomy( $taxonomy ) {
-			return ( array_key_exists( $taxonomy, $this->get_taxonomies() ) ) ? $taxonomy : 'category';
-		}
-		function get_template_control( $template ) {
-			$o = "\n\t" . '<fieldset><legend>' . __( 'Display Taxonomy As:' ) . '</legend>';
-			foreach( $this->templates as $name => $label ) {
-				$id = $this->get_field_id( 'template' ) . '-' . $name;
-				$checked = ( $name === $template ) ? ' checked="checked"' : '';
-				$o.= "\n\t" . '<input' . $checked . ' type="radio" name="' . $this->get_field_name( 'template' ) . '" value="' . $name . '" id="' . $id . '" />';
-				$o.= "\n\t" . '<label for="' . $id . '">' . $label . '</label><br />';
-			}
-			$o.= "\n\t" . '</fieldset>';
-			return $o;
-		}
-		function get_taxonomy_control( $taxonomy ) {
-			$id = $this->get_field_id( 'taxonomy' );
-			$name = $this->get_field_name( 'taxonomy' );
-			$o = "\n\t" . '<label class="heading" for="' . $id . '">' . __( 'Choose Taxonomy to Display:' ) . '</label>';
-			$o.= "\n\t" . '<select name="' . $name . '" id="' . $id . '">';
-			foreach( $this->get_taxonomies() as $name => $tax ) {
-				$selected = ( $name === $taxonomy ) ? ' selected="selected"' : '';
-				$o.= "\n\t" . '<option' . $selected . ' value="' . $name . '">' . $tax->label . '</option>';
-			}
-			$o.= "\n\t" . '</select>';
-			return $o;
-		}
-		function get_taxonomies() {
-			$o = array();
-			$taxonomies = get_taxonomies( array(), 'objects' );
-			if( !empty( $taxonomies ) ) {
-				foreach( $taxonomies as $key => $taxonomy )
-					if( !in_array( $key, $this->excluded_taxonomies ) )
-						$o[$taxonomy->name] = $taxonomy;
-			}
-			return $o;
-		}
-		function get_query_var_name( $taxonomy ) {
-			if ( $taxonomy === 'category' )
-				return 'cat';
-			if ( $taxonomy === 'post_tag' )
-				return 'tag';
-			else
-				return $taxonomy;
-		}
-		function widget( $args, $instance ) {
-			global $wp_query;
-			$queried_object = $wp_query->get_queried_object();
-			
-			$selected = 0;
-			if( isset( $queried_object->taxonomy ) ) {
-				if( $queried_object->taxonomy === 'category' )
-					$selected = $queried_object->term_id;
-				else 
-					$selected = $queried_object->slug;
-			}
-			
-			extract( $args );
-			$c = $instance['count'] ? '1' : '0';
-			$hierarchical = $instance['hierarchical'] ? '1' : '0';
-			$display_title = $instance['display_title'] ? '1' : '0';
-			$template = $this->sanitize_template( $instance['template'] );
-			$taxonomy = $this->sanitize_taxonomy( $instance['taxonomy'] );
-			
-			$title = false;
-			if( $display_title ) {
-				$title = ( empty( $instance['title'] ) ) ? $this->taxonomies[$taxonomy]->label : $instance['title'];
-				$title = apply_filters( 'widget_title', $title );
-			}
-			
-			print $before_widget;
-			if ( $title )
-				print $before_title . $title . $after_title;
-			
-			$default_args = array(
-				'orderby' => 'name',
-				'show_count' => $c,
-				'hierarchical' => $hierarchical,
-				'taxonomy' => $taxonomy
-				);
-			
-			$taxonomy_args = apply_filters( 'mfields_taxonomy_widget_args_global', $default_args );
-			
-			switch( $template ) {
-				case 'dropdown' :
-					$text = __( 'Please Choose', 'mfields-taxonomy-widget' );
-					$text = apply_filters( 'taxonomy-widget-show-option-none', $text );
-					$text = apply_filters( 'taxonomy-widget-show-option-none-' . $taxonomy, $text );
-					$text = esc_attr( $text );
-					$taxonomy_args['id'] = $this->get_field_id( 'mfields_taxonomy_widget_dropdown_wrapper' );
-					$taxonomy_args['name'] = $this->get_query_var_name( $taxonomy );
-					$taxonomy_args['show_option_none'] = $text;
-					$taxonomy_args['selected'] = $selected;
-					mfields_dropdown_taxonomy_terms( apply_filters( 'mfields_taxonomy_widget_args_dropdown', $taxonomy_args ) );
-					global $mfields_taxonomy_widget_js;
-					$mfields_taxonomy_widget_js[] = $taxonomy_args['id'];
+		$clean = array();
+		foreach ( (array) $args as $key => $value ) {
+			switch ( $key ) {
+				/* Title */
+				case 'title' :
+					$clean[$key] = trim( strip_tags( $value ) );
 					break;
-				case 'cloud' :
-					wp_tag_cloud( apply_filters( 'mfields_taxonomy_widget_args_cloud', $taxonomy_args ) );
+				
+				/* Taxonomy */
+				case 'taxonomy' :	
+					$clean[$key] = 'category';
+					if ( array_key_exists( $value, $this->taxonomies ) ) {
+						$clean[$key] = $value;
+					}
 					break;
-				case 'ol' :
-				case 'ul' : 
+				
+				/* Template */
+				case 'template' :
+					$clean[$key] = 'ul';
+					if ( array_key_exists( $value, $this->templates ) ) {
+						$clean[$key] = $value;
+					}
+					break;
+					
+				/* Boolean */
 				default :
-					$tag = ( $template === 'ol' ) ? 'ol' : 'ul';
-					print "\n\t" . '<' . $tag . '>';
-					$taxonomy_args['title_li'] = '';
-					wp_list_categories( apply_filters( 'mfields_taxonomy_widget_args_list', $taxonomy_args ) );
-					print "\n\t" . '</' . $tag . '>';
+					$clean[$key] = (bool) $value;
 					break;
 			}
-			print $after_widget;
 		}
-		function update( $new_instance, $old_instance ) {
-			$instance = $old_instance;
-			$instance['title'] = strip_tags( $new_instance['title'] );
-			$instance['display_title'] = $new_instance['display_title'] ? 1 : 0;
-			$instance['count'] = $new_instance['count'] ? 1 : 0;
-			$instance['hierarchical'] = $new_instance['hierarchical'] ? 1 : 0;		
-			$instance['template'] = $this->sanitize_template( $new_instance['template'] );
-			$instance['taxonomy'] = $this->sanitize_taxonomy( $new_instance['taxonomy'] );
-			return $instance;
-		}
-		function form( $instance ) {
-			//Defaults
-			$instance = wp_parse_args( (array) $instance, array( 'title' => '' ) );
-			$title = esc_attr( $instance['title'] );
-			$display_title = isset( $instance['display_title'] ) ? (bool) $instance['display_title'] : true;
-			$count = isset( $instance['count'] ) ? (bool) $instance['count'] : false;
-			$hierarchical = isset( $instance['hierarchical'] ) ? (bool) $instance['hierarchical'] : false;
-			$template = 'ul';
-			if( isset( $instance['template'] ) ) {
-				$template = $this->sanitize_template( $instance['template'] );
+		return $clean;
+	}
+
+	function widget( $args, $instance ) {
+		extract( $args );
+		extract( $this->clean_args( $instance ) );
+
+		$taxonomy_object = get_taxonomy( $taxonomy );
+
+		/*
+		 * Return early if taxonomy does not support clouds.
+		 */
+		if ( 'cloud' == $template && isset( $taxonomy_object->show_tagcloud ) && empty( $taxonomy_object->show_tagcloud ) ) {
+			if ( current_user_can( 'edit_theme_options' ) ) {
+				print '<div class="dialog mfields-taxonomy-widget-error">';
+				print $before_title . sprintf( esc_html__( 'Taxonomy Widget Error', 'mfields-taxonomy-widget' ) ) . $after_title;
+				if ( isset( $taxonomy_object->label ) && ! empty( $taxonomy_object->label ) ) {
+					printf( esc_html__( 'Term clouds are not supported for &#8220;%1$s&#8221;.', 'mfields-taxonomy-widget' ), $taxonomy_object->label );
+				}
+				else {
+					printf( esc_html__( 'Term clouds are not supported for this taxonomy.', 'mfields-taxonomy-widget' ) );
+				}
+				print '</div>';
 			}
-			$taxonomy = 'category';
-			if( isset( $instance['taxonomy'] ) ) {
-				$taxonomy = $this->sanitize_taxonomy( $instance['taxonomy'] );
+			return;
+		}
+
+		$title = apply_filters( 'widget_title', $title );
+
+		print $before_widget;
+
+		if ( ! empty( $title ) ) {
+			print $before_title . $title . $after_title;
+		}
+
+		$taxonomy_args = apply_filters( 'mfields_taxonomy_widget_args_global', array(
+			'hierarchical' => $hierarchical,
+			'orderby'      => 'name',
+			'show_count'   => $count,
+			'taxonomy'     => $taxonomy
+			) );
+
+		switch ( $template ) {
+
+			case 'dropdown' :
+
+				$term = get_queried_object();
+
+				$show_option_none = __( 'Please Choose', 'mfields-taxonomy-widget' );
+				$show_option_none = apply_filters( 'taxonomy-widget-show-option-none', $show_option_none );
+				$show_option_none = apply_filters( 'taxonomy-widget-show-option-none-' . $taxonomy, $show_option_none );
+				$show_option_none = esc_attr( $show_option_none );
+
+				$selected = null;
+				if ( isset( $term->taxonomy ) ) {
+					$selected = get_term_link( $term, $term->taxonomy );
+				}
+
+				/* Arguments specific to wp_dropdown_categories(). */
+				$dropdown_args = array(
+					'id'               => $this->get_field_id( 'mfields_taxonomy_widget_dropdown_wrapper' ),
+					'name'             => $taxonomy_object->query_var,
+					'selected'         => $selected,
+					'show_option_none' => $show_option_none,
+					'walker'           => new Mfields_Walker_Taxonomy_Dropdown(),
+					);
+
+				$args = array_merge( $taxonomy_args, $dropdown_args );
+
+				wp_dropdown_categories( $args );
+
+				$this->listeners_add( $args['id'] );
+
+				break;
+
+			case 'cloud' :
+				wp_tag_cloud( apply_filters( 'mfields_taxonomy_widget_args_cloud', $taxonomy_args ) );
+				break;
+
+			case 'ol' :
+			case 'ul' : 
+			default :
+				$tag = 'ul';
+				if ( $template == 'ol' ) {
+					$tag = 'ol';
+				}
+				print "\n\t" . '<' . $tag . '>';
+				$taxonomy_args['title_li'] = '';
+				wp_list_categories( apply_filters( 'mfields_taxonomy_widget_args_list', $taxonomy_args ) );
+				print "\n\t" . '</' . $tag . '>';
+				break;
+		}
+		print $after_widget;
+	}
+
+	function update( $new_instance, $old_instance ) {
+		return $this->clean_args( $new_instance );
+	}
+
+	function form( $instance ) {
+		extract( $this->clean_args( $instance ) );
+
+		print "\n\t" . '<div class="mfields-taxonomy-widget-admin">';
+
+		/*
+		 * Widget Title.
+		 */
+		print "\n\t" . '<p><label for="' . esc_attr( $this->get_field_id( 'title' ) ) . '" class="heading">' . esc_html__( 'Title:', 'mfields-taxonomy-widget' ) . '</label>';
+		print "\n\t" . '<input class="widefat" id="' . esc_attr( $this->get_field_id( 'title' ) ) . '" name="' . esc_attr( $this->get_field_name( 'title' ) ) . '" type="text" value="' . esc_attr( $title ) . '" /></p>';
+
+		/*
+		 * Choose a Taxonomy.
+		 */
+		$id = $this->get_field_id( 'taxonomy' );
+		print "\n\t" . '<label class="heading" for="' . esc_attr( $id ) . '">' . esc_html__( 'Choose Taxonomy to Display:', 'mfields-taxonomy-widget' ) . '</label>';
+		print "\n\t" . '<select name="' . esc_attr( $this->get_field_name( 'taxonomy' ) ) . '" id="' . esc_attr( $id ) . '" class="widefat">';
+		foreach ( $this->taxonomies as $slug => $taxonomy ) {
+			if ( isset( $taxonomy->label ) && ! empty( $taxonomy->label ) ) {
+				print "\n\t" . '<option value="' . esc_attr( $slug ) . '" ' . selected( $slug, $instance['taxonomy'], false ) . '>' . esc_html( $taxonomy->label ) . '</option>';
 			}
-			print "\n\t" . '<div class="mfields-taxonomy-widget-admin">';
-			
-			/* TITLE */
-			print "\n\t" . '<p><label for="' . $this->get_field_id('title') . '" class="heading">' . __( 'Title:' ) . '</label>';
-			print "\n\t" . '<input class="widefat" id="' . $this->get_field_id('title') . '" name="' . $this->get_field_name('title') . '" type="text" value="' . $title . '" /></p>';
-			
-			/* TAXONOMY */
-			print $this->get_taxonomy_control( $taxonomy );
-			
-			/* TEMPLATE */
-			print $this->get_template_control( $template );
-			
-			print "\n\t" . '<fieldset><legend>Advanced Options</legend>';
-			
-			/* DISPLAY TITLE */
-			print "\n\t" . '<input type="checkbox" class="checkbox" id="' . $this->get_field_id( 'display_title' ) . '" name="' . $this->get_field_name( 'display_title' ) . '"' . checked( $display_title, true, false ) . ' />';
-			print "\n\t" . '<label for="' . $this->get_field_id( 'display_title' ) . '">' . __( 'Display Title' ) . '</label><br />';
-			
-			/* COUNT */
-			print "\n\t" . '<input type="checkbox" class="checkbox" id="' . $this->get_field_id( 'count' ) . '" name="' . $this->get_field_name( 'count' ) . '"' . checked( $count, true, false ) . ' />';
-			print "\n\t" . '<label for="' . $this->get_field_id( 'count' ) . '">' . __( 'Show post counts' ) . '</label><br />';
-			
-			/* HEIRARCHICAL */
-			print "\n\t" . '<input type="checkbox" class="checkbox" id="' . $this->get_field_id( 'hierarchical' ) . '" name="' . $this->get_field_name( 'hierarchical' ) . '"' . checked( $hierarchical, true, false ) . ' />';
-			print "\n\t" . '<label for="' . $this->get_field_id( 'hierarchical' ) . '">' . __( 'Show hierarchy' ) . '</label>';
-			
-			print "\n\t" . '</fieldset>';
-			print "\n\t" . '</div>';
 		}
+		print "\n\t" . '</select>';
+
+		/*
+		 * Display Taxonomy As.
+		 */
+		print "\n\t" . '<fieldset><legend>' . esc_html__( 'Display Taxonomy As:', 'mfields-taxonomy-widget' ) . '</legend>';
+		foreach( $this->templates as $name => $label ) {
+			$id = $this->get_field_id( 'template' ) . '-' . $name;
+			print "\n\t" . '<input type="radio" name="' . esc_attr( $this->get_field_name( 'template' ) ) . '" value="' . esc_attr( $name ) . '" id="' . esc_attr( $id ) . '" ' . checked( $name, $template, false ) . ' />';
+			print "\n\t" . '<label for="' . esc_attr( $id ) . '">' . esc_html( $label ) . '</label><br />';
+		}
+		print  "\n\t" . '</fieldset>';
+
+		print "\n\t" . '<fieldset><legend>' . esc_html__( 'Advanced Options', 'mfields-taxonomy-widget' ) . '</legend>';
+
+		/*
+		 * Display Title?
+		 */
+		print "\n\t" . '<input type="checkbox" class="checkbox" id="' . esc_attr( $this->get_field_id( 'display_title' ) ) . '" name="' . esc_attr( $this->get_field_name( 'display_title' ) ) . '"' . checked( $display_title, true, false ) . ' />';
+		print "\n\t" . '<label for="' . esc_attr( $this->get_field_id( 'display_title' ) ) . '">' . esc_html__( 'Display Title', 'mfields-taxonomy-widget' ) . '</label><br />';
+
+		/*
+		 * Show Post Counts?
+		 */
+		print "\n\t" . '<input type="checkbox" class="checkbox" id="' . esc_attr( $this->get_field_id( 'count' ) ) . '" name="' . esc_attr( $this->get_field_name( 'count' ) ) . '"' . checked( $count, true, false ) . ' />';
+		print "\n\t" . '<label for="' . esc_attr( $this->get_field_id( 'count' ) ) . '">' . esc_html__( 'Show post counts', 'mfields-taxonomy-widget' ) . '</label><br />';
+
+		/*
+		 * Show Hierarchy?
+		 */
+		print "\n\t" . '<input type="checkbox" class="checkbox" id="' . esc_attr( $this->get_field_id( 'hierarchical' ) ) . '" name="' . esc_attr( $this->get_field_name( 'hierarchical' ) ) . '"' . checked( $hierarchical, true, false ) . ' />';
+		print "\n\t" . '<label for="' . esc_attr( $this->get_field_id( 'hierarchical' ) ) . '">' . esc_html__( 'Show hierarchy', 'mfields-taxonomy-widget' ) . '</label>';
+
+		print "\n\t" . '</fieldset>';
+		print "\n\t" . '</div>';
 	}
 }
-/* Forked version of wp_dropdown_categories() */
-function mfields_dropdown_taxonomy_terms( $args = '' ) {
-	$defaults = array(
-		'show_option_all' => '', 'show_option_none' => '',
-		'orderby' => 'id', 'order' => 'ASC',
-		'show_last_update' => 0, 'show_count' => 0,
-		'hide_empty' => 1, 'child_of' => 0,
-		'exclude' => '', 'echo' => 1,
-		'selected' => 0, 'hierarchical' => 0,
-		'name' => 'cat', 'class' => 'postform',
-		'depth' => 0, 'tab_index' => 0
-	);
-	
-	$defaults['selected'] = ( is_category() ) ? get_query_var( 'cat' ) : 0;
 
-	$r = wp_parse_args( $args, $defaults );
 
-	if ( !isset( $r['pad_counts'] ) && $r['show_count'] && $r['hierarchical'] ) {
-		$r['pad_counts'] = true;
-	}
+/* Custom version of Walker_CategoryDropdown */
+class Mfields_Walker_Taxonomy_Dropdown extends Walker {
+	var $db_fields = array(
+		'id'     => 'term_id',
+		'parent' => 'parent'
+		);
 
-	$r['include_last_update_time'] = $r['show_last_update'];
-	extract( $r );
-
-	$tab_index_attribute = '';
-	if ( (int) $tab_index > 0 )
-		$tab_index_attribute = " tabindex=\"$tab_index\"";
-
-	$categories = get_categories( $r );
-	$name = esc_attr($name);
-	$class = esc_attr($class);
-	
-	$id = ( !empty( $id ) ) ? esc_attr( $id ) : $name;
-	
-	$output = '';
-	if ( ! empty( $categories ) ) {
-		$output = "<select name='$name' id='$id' class='$class' $tab_index_attribute>\n";
-
-		if ( $show_option_all ) {
-			$show_option_all = apply_filters( 'list_cats', $show_option_all );
-			$selected = ( '0' === strval($r['selected']) ) ? " selected='selected'" : '';
-			$output .= "\t<option value='0'$selected>$show_option_all</option>\n";
-		}
-
-		if ( $show_option_none ) {
-			$show_option_none = apply_filters( 'list_cats', $show_option_none );
-			$selected = ( '-1' === strval($r['selected']) ) ? " selected='selected'" : '';
-			$output .= "\t<option value='-1'$selected>$show_option_none</option>\n";
-		}
-
-		if ( $hierarchical )
-			$depth = $r['depth'];  // Walk the full depth.
-		else
-			$depth = -1; // Flat.
-		
-		$output .= mfields_walk_taxonomy_dropdown_tree( $categories, $depth, $r );
-		$output .= "</select>\n";
-	}
-
-	$output = apply_filters( 'wp_dropdown_cats', $output );
-
-	if ( $echo )
-		echo $output;
-
-	return $output;
-}
-/* Forked version of walk_category_dropdown_tree() */
-function mfields_walk_taxonomy_dropdown_tree() {
-	$args = func_get_args();
-	// the user's options are the third parameter
-	if ( empty( $args[2]['walker'] ) || !is_a( $args[2]['walker'], 'Walker' ) )
-		$walker = new mfields_walker_taxonomy_dropdown;
-	else
-		$walker = $args[2]['walker'];
-
-	return call_user_func_array( array( &$walker, 'walk' ), $args );
-}
-/* Forked version of Walker_CategoryDropdown */
-class mfields_walker_taxonomy_dropdown extends Walker {
 	var $tree_type = 'category';
-	var $db_fields = array ('parent' => 'parent', 'id' => 'term_id');
-	
-	function start_el( &$output, $category, $depth, $args ) {
-		$pad = str_repeat( '&nbsp;', $depth * 3 );
-		$cat_name = apply_filters( 'list_cats', $category->name, $category );
-		
-		if( $category->taxonomy === 'category' )
-			$value = esc_attr( $category->term_id );
-		else
-			$value = esc_attr( $category->slug );
-			
-		$output .= "\t<option class=\"level-$depth\" value=\"" . $value . "\"";
-		
-		if( is_category() || is_tax() ) {
-			if ( $category->taxonomy === 'category' ) {
-				if ( $category->term_id == $args['selected'] )
-					$output .= ' selected="selected"';
-			}
-			else {
-				if ( $category->slug == $args['selected'] )
-					$output .= ' selected="selected"';
-			}
+
+	function start_el( &$output, $term, $depth, $args ) {
+		$url = get_term_link( $term, $term->taxonomy );
+
+		$selected = '';
+		if ( $url == $args['selected'] ) {
+			$selected .= ' selected="selected"';
 		}
-		$output .= '>';
-		$output .= $pad . $cat_name;
-		if ( $args['show_count'] )
-		$output .= '&nbsp;&nbsp;('. $category->count .')';
+
+		$text = str_repeat( '&nbsp;', $depth * 3 ) . $term->name;
+		if ( $args['show_count'] ) {
+			$text .= '&nbsp;&nbsp;('. $term->count .')';
+		}
 		if ( $args['show_last_update'] ) {
-			$format = 'Y-m-d';
-			$output .= '&nbsp;&nbsp;' . gmdate( $format, $category->last_update_timestamp );
+			$text .= '&nbsp;&nbsp;' . gmdate( __( 'Y-m-d', 'mfields-taxonomy-widget' ), $term->last_update_timestamp );
 		}
-		$output .= "</option>\n";
+
+		$class_name = 'level-' . $depth;
+
+		$output.= "\t" . '<option' . $selected . ' class="' . esc_attr( $class_name ) . '" value="' . esc_url( $url ) . '">' . esc_html( $text ) . '</option>' . "\n";
 	}
 }
-
-
-?>
